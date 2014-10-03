@@ -17,6 +17,7 @@ class ResqueScheduler_Worker
 	 * @var int Current log level of this worker.
 	 */
 	public $logLevel = 0;
+        
 	
 	/**
 	 * @var int Interval to sleep for between checking schedules.
@@ -43,7 +44,7 @@ class ResqueScheduler_Worker
 			$this->handleDelayedItems();
 			$this->sleep();
 		}
-	}
+	}      
 	
 	/**
 	 * Handle delayed items for the next scheduled timestamp.
@@ -55,7 +56,7 @@ class ResqueScheduler_Worker
 	 */
 	public function handleDelayedItems($timestamp = null)
 	{
-		while (($timestamp = ResqueScheduler::nextDelayedTimestamp($timestamp)) !== false) {
+		while (($timestamp = ResqueScheduler::nextDelayedTimestamp($timestamp)) !== false) { 
 			$this->updateProcLine('Processing Delayed Items');
 			$this->enqueueDelayedItemsForTimestamp($timestamp);
 		}
@@ -73,16 +74,29 @@ class ResqueScheduler_Worker
 	{
 		$item = null;
 		while ($item = ResqueScheduler::nextItemForTimestamp($timestamp)) {
-			$this->log('queueing ' . $item['class'] . ' in ' . $item['queue'] .' [delayed]');
+			$this->log('queueing task in ' . $item['queue'] .' [delayed]');
 			
 			Resque_Event::trigger('beforeDelayedEnqueue', array(
 				'queue' => $item['queue'],
 				'class' => $item['class'],
 				'args'  => $item['args'],
+                                'closure'  => $item['closure'],
 			));
+                        
+                        if($item['closure']) {
+                            $closure = unserialize($item['class']);
+                            $call = function() use ($closure) {
+                                Resque_Job_Closure::invokeSerializableClosure($closure);
+                            };
+                        } else {
+                            $call = $item['class'];
+                        }
 
-			$payload = array_merge(array($item['queue'], $item['class']), $item['args']);
-			call_user_func_array('Resque::enqueue', $payload);
+                        if(class_exists("Resque")) {
+                            Resque::enqueue($item['queue'], $call, $item['args']);
+                        } else {
+                            throw new Exception("class Resque not found");
+                        }
 		}
 	}
 	

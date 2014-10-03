@@ -1,4 +1,5 @@
 <?php
+use Illuminate\Support\SerializableClosure;
 /**
 * ResqueScheduler core class to handle scheduling of jobs in the future.
 *
@@ -19,12 +20,12 @@ class ResqueScheduler
 	 *
 	 * @param int $in Number of seconds from now when the job should be executed.
 	 * @param string $queue The name of the queue to place the job in.
-	 * @param string $class The name of the class that contains the code to execute the job.
+	 * @param string $call The name of the class or closure.
 	 * @param array $args Any optional arguments that should be passed when the job is executed.
 	 */
-	public static function enqueueIn($in, $queue, $class, array $args = array())
+	public static function enqueueIn($in, $queue, $call, array $args = array())
 	{
-		self::enqueueAt(time() + $in, $queue, $class, $args);
+		self::enqueueAt(time() + $in, $queue, $call, $args);
 	}
 
 	/**
@@ -36,20 +37,26 @@ class ResqueScheduler
 	 *
 	 * @param DateTime|int $at Instance of PHP DateTime object or int of UNIX timestamp.
 	 * @param string $queue The name of the queue to place the job in.
-	 * @param string $class The name of the class that contains the code to execute the job.
+	 * @param string $call The name of the class or closure.
 	 * @param array $args Any optional arguments that should be passed when the job is executed.
 	 */
-	public static function enqueueAt($at, $queue, $class, $args = array())
+	public static function enqueueAt($at, $queue, $call, $args = array())
 	{
-		self::validateJob($class, $queue);
-
-		$job = self::jobToHash($queue, $class, $args);
+		self::validateJob($call, $queue);
+                
+                if($call instanceof Closure) {
+                    $serialized = serialize(new SerializableClosure($call));
+                    $job = self::jobToHash($queue, $serialized, $args, true);
+                } else {
+                    $job = self::jobToHash($queue, $call, $args);
+                }
+                
 		self::delayedPush($at, $job);
 		
 		Resque_Event::trigger('afterSchedule', array(
 			'at'    => $at,
 			'queue' => $queue,
-			'class' => $class,
+			'class' => $call,
 			'args'  => $args,
 		));
 	}
@@ -102,14 +109,21 @@ class ResqueScheduler
      * searched
      *
      * @param $queue
-     * @param $class
+     * @param $call
      * @param $args
      * @return int number of jobs that were removed
      */
-    public static function removeDelayed($queue, $class, $args)
+    public static function removeDelayed($queue, $call, $args)
     {
        $destroyed=0;
-       $item=json_encode(self::jobToHash($queue, $class, $args));
+       
+       if($call instanceof Closure) {
+            $serialized = serialize(new SerializableClosure($call));
+            $item=json_encode(self::jobToHash($queue, $serialized, $args, true));
+       } else {
+            $item=json_encode(self::jobToHash($queue, $call, $args));
+       }
+
        $redis=Resque::redis();
 
        foreach($redis->keys('delayed:*') as $key)
@@ -130,14 +144,20 @@ class ResqueScheduler
      *
      * @param $timestamp
      * @param $queue
-     * @param $class
+     * @param $call
      * @param $args
      * @return mixed
      */
-    public static function removeDelayedJobFromTimestamp($timestamp, $queue, $class, $args)
+    public static function removeDelayedJobFromTimestamp($timestamp, $queue, $call, $args)
     {
         $key = 'delayed:' . self::getTimestamp($timestamp);
-        $item = json_encode(self::jobToHash($queue, $class, $args));
+        
+        if($call instanceof Closure) {
+            $serialized = serialize(new SerializableClosure($call));
+            $item=json_encode(self::jobToHash($queue, $serialized, $args, true));
+        } else {
+            $item=json_encode(self::jobToHash($queue, $call, $args));
+        }
         $redis = Resque::redis();
         $count = $redis->lrem($key, 0, $item);
         self::cleanupTimestamp($key, $timestamp);
@@ -153,12 +173,13 @@ class ResqueScheduler
 	 * @param array $args Array of job arguments.
 	 */
 
-	private static function jobToHash($queue, $class, $args)
+	private static function jobToHash($queue, $class, $args, $closure=false)
 	{
 		return array(
 			'class' => $class,
 			'args'  => array($args),
 			'queue' => $queue,
+                        'closure' => $closure ? true : false
 		);
 	}
 
@@ -260,7 +281,7 @@ class ResqueScheduler
 	private static function validateJob($class, $queue)
 	{
 		if (empty($class)) {
-			throw new Resque_Exception('Jobs must be given a class.');
+			throw new Resque_Exception('Jobs must be given a class name or closure.');
 		}
 		else if (empty($queue)) {
 			throw new Resque_Exception('Jobs must be put in a queue.');
