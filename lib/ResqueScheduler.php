@@ -22,10 +22,11 @@ class ResqueScheduler
 	 * @param string $queue The name of the queue to place the job in.
 	 * @param string $call The name of the class or closure.
 	 * @param array $args Any optional arguments that should be passed when the job is executed.
+         * @param string $method method name to invoke in job class.
 	 */
-	public static function enqueueIn($in, $queue, $call, array $args = array())
+	public static function enqueueIn($in, $queue, $call, array $args = array(), $method = 'fire')
 	{
-		self::enqueueAt(time() + $in, $queue, $call, $args);
+		self::enqueueAt(time() + $in, $queue, $call, $args, $method);
 	}
 
 	/**
@@ -39,8 +40,9 @@ class ResqueScheduler
 	 * @param string $queue The name of the queue to place the job in.
 	 * @param string $call The name of the class or closure.
 	 * @param array $args Any optional arguments that should be passed when the job is executed.
+         * @param string $method method name to invoke in job class.
 	 */
-	public static function enqueueAt($at, $queue, $call, $args = array())
+	public static function enqueueAt($at, $queue, $call, $args = array(), $method = 'fire')
 	{
 		self::validateJob($call, $queue);
                 
@@ -48,7 +50,7 @@ class ResqueScheduler
                     $serialized = serialize(new SerializableClosure($call));
                     $job = self::jobToHash($queue, $serialized, $args, true);
                 } else {
-                    $job = self::jobToHash($queue, $call, $args);
+                    $job = self::jobToHash($queue, $call, $args, false, $method);
                 }
                 
 		self::delayedPush($at, $job);
@@ -57,6 +59,7 @@ class ResqueScheduler
 			'at'    => $at,
 			'queue' => $queue,
 			'class' => $call,
+                        'method' => $method,
 			'args'  => $args,
 		));
 	}
@@ -111,17 +114,18 @@ class ResqueScheduler
      * @param $queue
      * @param $call
      * @param $args
+     * @param $method
      * @return int number of jobs that were removed
      */
-    public static function removeDelayed($queue, $call, $args)
+    public static function removeDelayed($queue, $call, $args, $method = 'fire')
     {
        $destroyed=0;
        
        if($call instanceof Closure) {
             $serialized = serialize(new SerializableClosure($call));
-            $item=json_encode(self::jobToHash($queue, $serialized, $args, true));
+            $item=json_encode(self::jobToHash($queue, $serialized, $args, true, $method));
        } else {
-            $item=json_encode(self::jobToHash($queue, $call, $args));
+            $item=json_encode(self::jobToHash($queue, $call, $args, false, $method));
        }
 
        $redis=Resque::redis();
@@ -146,17 +150,18 @@ class ResqueScheduler
      * @param $queue
      * @param $call
      * @param $args
+     * @param $method
      * @return mixed
      */
-    public static function removeDelayedJobFromTimestamp($timestamp, $queue, $call, $args)
+    public static function removeDelayedJobFromTimestamp($timestamp, $queue, $call, $args, $method = 'fire')
     {
         $key = 'delayed:' . self::getTimestamp($timestamp);
         
         if($call instanceof Closure) {
             $serialized = serialize(new SerializableClosure($call));
-            $item=json_encode(self::jobToHash($queue, $serialized, $args, true));
+            $item=json_encode(self::jobToHash($queue, $serialized, $args, true, $method));
         } else {
-            $item=json_encode(self::jobToHash($queue, $call, $args));
+            $item=json_encode(self::jobToHash($queue, $call, $args, false, $method));
         }
         $redis = Resque::redis();
         $count = $redis->lrem($key, 0, $item);
@@ -173,11 +178,12 @@ class ResqueScheduler
 	 * @param array $args Array of job arguments.
 	 */
 
-	private static function jobToHash($queue, $class, $args, $closure=false)
+	private static function jobToHash($queue, $class, $args, $closure=false, $method = 'fire')
 	{
 		return array(
 			'class' => $class,
 			'args'  => array($args),
+                        'method' => $method,
 			'queue' => $queue,
                         'closure' => $closure ? true : false
 		);
