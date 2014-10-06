@@ -91,9 +91,8 @@ class ResqueScheduler_Worker
                         } else {
                             $call = $item['class'];
                         }
-
                         if(class_exists("Resque")) {
-                            Resque::enqueue($item['queue'], $call, $item['args'], $item['method']);
+                            Resque::enqueue($item['queue'], $call, $item['args'], false, $item['method']);
                         } else {
                             throw new Exception("class Resque not found");
                         }
