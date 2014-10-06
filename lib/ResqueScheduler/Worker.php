@@ -56,7 +56,7 @@ class ResqueScheduler_Worker
 	 */
 	public function handleDelayedItems($timestamp = null)
 	{
-		while (($timestamp = ResqueScheduler::nextDelayedTimestamp($timestamp)) !== false) { 
+		while (($timestamp = ResqueScheduler::nextDelayedTimestamp($timestamp)) !== false) {
 			$this->updateProcLine('Processing Delayed Items');
 			$this->enqueueDelayedItemsForTimestamp($timestamp);
 		}
@@ -82,7 +82,10 @@ class ResqueScheduler_Worker
 				'args'  => $item['args'],
                                 'closure'  => $item['closure'],
 			));
-                        
+                        if(!isset($item['args'][0])) {
+                            $item['args'] = $item['args'][0];
+                        }
+                        $item['args']=$item['args'][0];
                         if($item['closure']) {
                             $closure = unserialize($item['class']);
                             $call = function() use ($closure) {
